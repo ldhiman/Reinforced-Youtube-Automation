@@ -25,45 +25,15 @@ ALL_SUBREDDITS = [
     "me_irl",
     "wholesomememes",
     "okbuddyretard",
-
-    # large meme subs
     "funny",
-    "AdviceAnimals",
     "comedyheaven",
     "ComedyCemetery",
     "terriblefacebookmemes",
-
-    # relatable memes
-    "2meirl4meirl",
-    "TooMeIrlForMeIrl",
-    "meirl",
-    "starterpacks",
-
-    # internet culture
-    "MemeEconomy",
-    "memetemplatesofficial",
-
-    # gaming memes
-    "gamingmemes",
     "MinecraftMemes",
     "LeagueOfMemes",
-
-    # niche / experimental
-    "dankchristianmemes",
-    "bonehurtingjuice",
-    "okbuddybaka",
-
-    # zoomer / chaotic
-    "196",
-    "197",
-
-    # history / knowledge memes
     "HistoryMemes",
     "ProgrammerHumor",
-
-    # high engagement communities
     "HolUp",
-    "Unexpected",
 ]
 
 MEMES_PER_SUB = 8

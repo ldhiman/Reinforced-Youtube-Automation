@@ -6,7 +6,7 @@ from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 
-from db import DB_PATH
+from db import get_connection
 from services.reward import calculate_reward
 
 from datetime import timezone
@@ -139,7 +139,7 @@ def get_video_analytics(analytics, video_id):
 
 # ---- SAVE TO DB ----
 def save_analytics(video_id, meme_id, metrics):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
 
     # get video length from DB if stored (optional)

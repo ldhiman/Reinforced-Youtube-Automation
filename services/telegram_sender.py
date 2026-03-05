@@ -2,12 +2,15 @@ import requests
 import os
 import logging
 from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 # Your Bot configuration
-BOT_TOKEN = "8649220389:AAHZHd0melCKBrXfCABR96VrvGLxOIkZW3k"
-CHAT_ID = "6435302431"  # Can be a user ID or @channelname
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
 def upload_to_telegram(video_path: str, title: str, description: str) -> Optional[str]:
     """

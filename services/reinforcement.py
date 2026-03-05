@@ -1,6 +1,6 @@
 import sqlite3
 from collections import defaultdict
-from db import DB_PATH
+from db import get_connection
 
 
 LEARNING_RATE = 0.08
@@ -75,7 +75,7 @@ def compute_subreddit_stats(rewards):
 
 def update_template_weights():
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
 
     grouped = fetch_template_rewards(cursor)
@@ -130,7 +130,7 @@ def update_template_weights():
     conn.close()
 
 def update_weights():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
 
     grouped = fetch_reward_data(cursor)

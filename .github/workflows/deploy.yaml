@@ -1,4 +1,4 @@
-name: 🚀 Deploy FastAPI to EC2
+name: 🚀 Deploy to VM
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      - name: 🚀 Deploy to EC2
+      - name: 🚀 Deploy to VM
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}

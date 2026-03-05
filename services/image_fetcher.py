@@ -5,7 +5,7 @@ import uuid
 import cv2
 import sqlite3
 from typing import List, Dict
-from db import DB_PATH
+from db import get_connection
 import numpy as np
 import imagehash
 from PIL import Image
@@ -15,9 +15,33 @@ def get_template_hash(image_path):
         img.thumbnail((256,256))
         return str(imagehash.phash(img))
 
+def load_existing_hashes():
+    conn = get_connection()
+    cursor = conn.cursor()
 
-def meme_exists(reddit_post_id: str, template_hash: str) -> bool:
-    conn = sqlite3.connect(DB_PATH)
+    cursor.execute("""
+        SELECT template FROM memes
+        WHERE template IS NOT NULL
+    """)
+
+    hashes = [
+        imagehash.hex_to_hash(row[0])
+        for row in cursor.fetchall()
+    ]
+
+    conn.close()
+    return hashes
+
+def is_duplicate(hash_value, existing_hashes, threshold=6):
+
+    for db_hash in existing_hashes:
+        if hash_value - db_hash <= threshold:
+            return True
+
+    return False
+
+def meme_exists(reddit_post_id: str, ) -> bool:
+    conn = get_connection()
     cursor = conn.cursor()
 
     # First check reddit post id
@@ -26,28 +50,15 @@ def meme_exists(reddit_post_id: str, template_hash: str) -> bool:
         (reddit_post_id,)
     )
 
-    if cursor.fetchone():
-        conn.close()
-        return True
-
-    # Now check similar templates
-    cursor.execute("SELECT template FROM memes")
-
-    existing_hash = imagehash.hex_to_hash(template_hash)
-
-    for row in cursor.fetchall():
-        db_hash = imagehash.hex_to_hash(row[0])
-
-        if existing_hash - db_hash <= 6:  # similarity threshold
-            conn.close()
-            return True
-
+    exist = cursor.fetchone() is not None
+    
     conn.close()
-    return False
+    
+    return exist
 
 
 def save_meme_to_db(meme: Dict):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
 
     try:
@@ -96,6 +107,8 @@ def fetch_memes(
     downloaded = []
     used_urls = set()
 
+    existing_hashes = load_existing_hashes()
+
     for subreddit in subreddits:
         url = f"https://meme-api.com/gimme/{subreddit}/{per_subreddit}"
 
@@ -121,6 +134,10 @@ def fetch_memes(
 
             if ups < min_upvotes:
                 continue
+            
+            
+            if meme_exists(reddit_post_id):
+                continue  # avoid reposting same Reddit meme
 
             if not meme_url.lower().endswith((".jpg", ".jpeg", ".png")):
                 continue
@@ -168,12 +185,16 @@ def fetch_memes(
 
             used_urls.add(meme_url)
 
-            hashImage = get_template_hash(filename)
+            pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            pil_img.thumbnail((256,256))
 
-            if meme_exists(reddit_post_id, hashImage):
+            hash_obj = imagehash.phash(pil_img)
+            hashImage = str(hash_obj)
+
+            if is_duplicate(hash_obj, existing_hashes):
                 os.remove(filename)
-                continue  # avoid reposting same Reddit meme
-            
+                continue
+ 
 
             meme_data = {
                 "meme_id": meme_id,
@@ -197,5 +218,6 @@ def fetch_memes(
             # Only now save to DB
             save_meme_to_db(meme_data)
             downloaded.append(meme_data)
+            existing_hashes.append(hash_obj)
 
     return downloaded

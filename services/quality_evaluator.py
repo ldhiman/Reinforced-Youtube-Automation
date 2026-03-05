@@ -1,5 +1,5 @@
 import sqlite3
-from db import DB_PATH
+from db import get_connection
 import math
 
 
@@ -33,11 +33,11 @@ def evaluate_memes():
     No heuristics. No Reddit upvotes.
     Pure analytics-driven.
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT meme_id, subreddit
+        SELECT meme_id, subreddit, template, ups
         FROM memes
         WHERE final_score IS NULL
     """)

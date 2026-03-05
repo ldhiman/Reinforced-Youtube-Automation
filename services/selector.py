@@ -1,7 +1,7 @@
 import sqlite3
 import random
 from collections import defaultdict
-from db import DB_PATH
+from db import get_connection
 import os
 import random
 
@@ -72,7 +72,7 @@ def weighted_subreddit_choice(grouped, weights):
 # Main Selection Function
 # ---------------------------
 def select_memes(daily_count: int = 5):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
 
     remove_missing_files(cursor)
