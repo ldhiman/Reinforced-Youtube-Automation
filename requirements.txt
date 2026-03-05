@@ -1,0 +1,19 @@
+# --- Core HTTP ---
+requests>=2.31.0
+
+# --- OpenCV & Video Processing ---
+opencv-python>=4.9.0
+numpy>=1.26.0
+
+# --- Image Processing ---
+pillow>=10.1.0
+imageHash>=4.3.2
+
+# --- Google APIs ---
+google-api-python-client>=2.120.0
+google-auth>=2.29.0
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0
+
+# --- Optional but Recommended ---
+python-dotenv>=1.0.1
