@@ -170,7 +170,7 @@ def main():
                 video_id=video_id,
                 meme_id=meme["meme_id"],
                 hook_style="default",
-                video_length=6.0
+                video_length=3.0
             )
 
             mark_meme_used(meme["meme_id"])
