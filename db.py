@@ -135,6 +135,14 @@ def init_db():
     if current_version < 3:
         print("Upgrading DB to version 3")
 
+        # Add template column if missing
+        try:
+            cursor.execute("""
+            ALTER TABLE memes ADD COLUMN template TEXT
+            """)
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
         cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_memes_template
         ON memes(template)
