@@ -15,6 +15,16 @@ def get_template_hash(image_path):
         img.thumbnail((256,256))
         return str(imagehash.phash(img))
 
+def load_existing_posts():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT reddit_post_id FROM memes where reddit_post_id IS NOT NULL")
+    posts = {row[0] for row in cursor.fetchall()}
+
+    conn.close()
+    return posts
+
 def load_existing_hashes():
     conn = get_connection()
     cursor = conn.cursor()
@@ -39,23 +49,6 @@ def is_duplicate(hash_value, existing_hashes, threshold=6):
             return True
 
     return False
-
-def meme_exists(reddit_post_id: str, ) -> bool:
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    # First check reddit post id
-    cursor.execute(
-        "SELECT 1 FROM memes WHERE reddit_post_id = ? LIMIT 1",
-        (reddit_post_id,)
-    )
-
-    exist = cursor.fetchone() is not None
-    
-    conn.close()
-    
-    return exist
-
 
 def save_meme_to_db(meme: Dict):
     conn = get_connection()
@@ -107,13 +100,16 @@ def fetch_memes(
     downloaded = []
     used_urls = set()
 
+    existing_posts = load_existing_posts()
     existing_hashes = load_existing_hashes()
+
+    headers = {"User-Agent": "Mozilla/5.0 MemeBot"}
 
     for subreddit in subreddits:
         url = f"https://meme-api.com/gimme/{subreddit}/{per_subreddit}"
 
         try:
-            response = requests.get(url, timeout=15)
+            response = requests.get(url, headers=headers, timeout=15)
             response.raise_for_status()
         except requests.RequestException:
             continue
@@ -136,16 +132,21 @@ def fetch_memes(
                 continue
             
             
-            if meme_exists(reddit_post_id):
+            if reddit_post_id in existing_posts:
                 continue  # avoid reposting same Reddit meme
 
             if not meme_url.lower().endswith((".jpg", ".jpeg", ".png")):
                 continue
 
-            try:
-                img_response = requests.get(meme_url, stream=True, timeout=20)
-                img_response.raise_for_status()
-            except requests.RequestException:
+            for _ in range(2):
+                try:
+                    img_response = requests.get(meme_url, headers=headers, stream=True, timeout=20)
+                    img_response.raise_for_status()
+                    break
+                except requests.RequestException:
+                    img_response = None
+
+            if not img_response:
                 continue
 
             content_type = img_response.headers.get("Content-Type", "").lower()
@@ -166,12 +167,34 @@ def fetch_memes(
             filename = os.path.normpath(os.path.join(save_dir, f"{meme_id}.jpg"))
 
             # --- Decode safely using OpenCV ---
-            file_bytes = img_response.content
+            file_bytes = img_response.raw.read()
+            img_response.close()
             image_array = np.asarray(bytearray(file_bytes), dtype=np.uint8)
             img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
 
             # 🚫 If OpenCV cannot decode, skip
             if img is None:
+                continue
+
+            h, w = img.shape[:2]
+
+            # reject huge images
+            if h * w > 40_000_000 or h < 100 or w < 100: # Also reject tiny images
+                continue
+
+            MAX_DIM = 2000
+
+            if max(h, w) > MAX_DIM:
+                scale = MAX_DIM / max(h, w)
+                img = cv2.resize(img, (int(w * scale), int(h * scale)))
+            
+            pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            pil_img.thumbnail((256,256))
+
+            hash_obj = imagehash.phash(pil_img)
+            hashImage = str(hash_obj)
+
+            if is_duplicate(hash_obj, existing_hashes):
                 continue
 
             # --- Save re-encoded clean JPG ---
@@ -184,17 +207,6 @@ def fetch_memes(
                 continue
 
             used_urls.add(meme_url)
-
-            pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-            pil_img.thumbnail((256,256))
-
-            hash_obj = imagehash.phash(pil_img)
-            hashImage = str(hash_obj)
-
-            if is_duplicate(hash_obj, existing_hashes):
-                os.remove(filename)
-                continue
- 
 
             meme_data = {
                 "meme_id": meme_id,
@@ -210,14 +222,13 @@ def fetch_memes(
             if not os.path.exists(filename):
                 continue
 
-            test_img = cv2.imread(filename)
-            if test_img is None:
-                os.remove(filename)
-                continue
-
             # Only now save to DB
+            del image_array
+            del file_bytes
+            del img
             save_meme_to_db(meme_data)
             downloaded.append(meme_data)
+            existing_posts.add(reddit_post_id)
             existing_hashes.append(hash_obj)
 
     return downloaded

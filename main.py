@@ -36,7 +36,7 @@ ALL_SUBREDDITS = [
     "HolUp",
 ]
 
-MEMES_PER_SUB = 8
+MEMES_PER_SUB = 5
 DAILY_UPLOAD_COUNT = 3   # Change to 5 when scaling
 MIN_UPVOTES = 100
 
