@@ -200,7 +200,7 @@ def run_feedback():
             if metrics and metrics["views"] > 0:
                 save_analytics(video["video_id"], video["meme_id"], metrics)
             else:
-                print(f"Skipping DB save for {video["video_id"]}: Analytics data not yet processed by YouTube.")
+                print(f"Skipping DB save for {video['video_id']}: Analytics data not yet processed by YouTube.")
             
 
 
