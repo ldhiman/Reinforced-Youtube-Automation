@@ -34,6 +34,7 @@ token.json
 # -----------------------------
 storage/memes/*
 storage/outputs/*
+dashboard/data.json
 
 # keep folder structure
 !storage/memes/.gitkeep
