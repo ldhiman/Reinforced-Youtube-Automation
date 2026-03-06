@@ -1,6 +1,6 @@
 import re
-import sqlite3
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime, timedelta, timezone
 
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
@@ -9,199 +9,206 @@ from google.auth.transport.requests import Request
 from db import get_connection
 from services.reward import calculate_reward
 
-from datetime import timezone
+logger = logging.getLogger(__name__)
 
-MIN_AGE_DAYS = 1
+MIN_AGE_DAYS  = 3   # analytics need 2-day delay; 3 is safe
+REFETCH_HOURS = 12  # don't re-hit API if fetched recently
 
-
-# ---- CONFIG ----
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.readonly",
-    "https://www.googleapis.com/auth/yt-analytics.readonly"
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
 ]
-
 TOKEN_FILE = "token.json"
 
+logging.basicConfig(level=logging.INFO)
 
-# ---- AUTH ----
 def get_services():
     creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
-
-    # Auto refresh if expired
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        with open(TOKEN_FILE, "w") as token:
-            token.write(creds.to_json())
+        with open(TOKEN_FILE, "w") as f:
+            f.write(creds.to_json())
+    return (
+        build("youtube", "v3", credentials=creds),
+        build("youtubeAnalytics", "v2", credentials=creds),
+    )
 
-    youtube = build("youtube", "v3", credentials=creds)
-    analytics = build("youtubeAnalytics", "v2", credentials=creds)
 
-    return youtube, analytics
-
-
-# ---- META PARSER ----
 def extract_meme_id(description: str):
     match = re.search(r"id=([a-f0-9\-]+)", description)
     return match.group(1) if match else None
 
 
-def get_recent_videos(youtube):
-    request = youtube.search().list(
-        part="snippet",
-        forMine=True,
-        type="video",
-        maxResults=25,
-        order="date"
+def get_recent_videos(youtube) -> list[dict]:
+    """
+    Uses videos().list instead of search().list — 1 quota unit vs 100.
+    Pulls from uploads playlist of the authenticated channel.
+    """
+    # Step 1: get uploads playlist ID (1 unit)
+    channel_resp = youtube.channels().list(
+        part="contentDetails", mine=True
+    ).execute()
+
+    uploads_playlist = (
+        channel_resp["items"][0]["contentDetails"]
+        ["relatedPlaylists"]["uploads"]
     )
 
-    response = request.execute()
+    # Step 2: get recent uploads (1 unit per page)
+    playlist_resp = youtube.playlistItems().list(
+        part="snippet",
+        playlistId=uploads_playlist,
+        maxResults=25,
+    ).execute()
 
-    videos = []
+    now     = datetime.now(timezone.utc)
+    videos  = []
 
-    now = datetime.now(timezone.utc)
+    for item in playlist_resp.get("items", []):
+        snippet      = item["snippet"]
+        video_id     = snippet["resourceId"]["videoId"]
+        published_at = snippet["publishedAt"]
+        description  = snippet.get("description", "")
 
-    for item in response.get("items", []):
-        video_id = item["id"]["videoId"]
-        description = item["snippet"]["description"]
-        published_at = item["snippet"]["publishedAt"]
-
-        # Convert published time to datetime
-        published_dt = datetime.fromisoformat(
-            published_at.replace("Z", "+00:00")
-        )
-
-        age_days = (now - published_dt).days
+        published_dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        age_days     = (now - published_dt).days
 
         if age_days < MIN_AGE_DAYS:
-            print(f"Skipping {video_id} (only {age_days} days old)")
+            logger.debug(f"Skipping {video_id} — only {age_days}d old")
             continue
 
         meme_id = extract_meme_id(description)
+        if not meme_id:
+            logger.debug(f"Skipping {video_id} — no meme_id in description")
+            continue
 
-        if meme_id:
-            videos.append({
-                "video_id": video_id,
-                "meme_id": meme_id
-            })
+        videos.append({"video_id": video_id, "meme_id": meme_id})
 
     return videos
 
-def get_realtime_data(youtube, video_id):
-    """Fetches real-time views and likes (no 3-day delay)"""
-    request = youtube.videos().list(
-        part="statistics",
-        id=video_id
-    )
-    response = request.execute()
-    
-    if not response.get("items"):
+
+def _already_fetched_recently(video_id: str) -> bool:
+    """Returns True if this video was updated within REFETCH_HOURS."""
+    conn   = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT fetched_at FROM analytics
+        WHERE video_id = ?
+    """, (video_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row or not row[0]:
+        return False
+
+    fetched_at = datetime.fromisoformat(row[0])
+    if fetched_at.tzinfo is None:
+        fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+
+    age_hours = (datetime.now(timezone.utc) - fetched_at).total_seconds() / 3600
+    return age_hours < REFETCH_HOURS
+
+
+def get_video_analytics(analytics, video_id: str) -> dict | None:
+    # Dynamic window: from 90 days ago to 2 days ago (safe analytics window)
+    end_date   = (datetime.now() - timedelta(days=2)).date()
+    start_date = (datetime.now() - timedelta(days=90)).date()
+
+    try:
+        response = analytics.reports().query(
+            ids="channel==MINE",
+            startDate=start_date.strftime("%Y-%m-%d"),
+            endDate=end_date.strftime("%Y-%m-%d"),
+            metrics="engagedViews,views,likes,averageViewDuration,averageViewPercentage",
+            filters=f"video=={video_id}",
+        ).execute()
+    except Exception as e:
+        logger.warning(f"Analytics fetch failed for {video_id}: {e}")
         return None
-        
-    stats = response["items"][0]["statistics"]
-    print(video_id, stats)
-    return {
-        "views": int(stats.get("viewCount", 0)),
-        "likes": int(stats.get("likeCount", 0))
-    }
-
-# ---- FETCH ANALYTICS ----
-def get_video_analytics(analytics, video_id):
-    end_date = (datetime.now() - timedelta(days=2)).date()
-    start_date = datetime(2026, 2, 1).date()
-    response = analytics.reports().query(
-        ids="channel==MINE",
-        startDate=start_date.strftime('%Y-%m-%d'),
-        endDate=end_date.strftime('%Y-%m-%d'),
-        metrics="engagedViews,views,likes,averageViewDuration,averageViewPercentage",
-        filters=f"video=={video_id}"
-    ).execute()
-
-    print(video_id, response)
 
     rows = response.get("rows")
-
-
     if not rows:
         return None
 
-    engaged_views, views, likes, avg_watch_time, avg_view_percent = rows[0]
-
-    completion_rate = avg_view_percent / 100.0
+    engaged_views, views, likes, avg_watch_time, avg_view_pct = rows[0]
 
     return {
-        "views": views,
-        "likes": likes,
-        "engaged_views": engaged_views,
-        "avg_watch_time": avg_watch_time,
-        "completion_rate": completion_rate
+        "views":           int(views),
+        "likes":           int(likes),
+        "engaged_views":   int(engaged_views),
+        "avg_watch_time":  float(avg_watch_time),
+        "completion_rate": float(avg_view_pct) / 100.0,
     }
 
 
-# ---- SAVE TO DB ----
-def save_analytics(video_id, meme_id, metrics):
-    conn = get_connection()
+def save_analytics(video_id: str, meme_id: str, metrics: dict):
+    conn   = get_connection()
     cursor = conn.cursor()
 
-    # get video length from DB if stored (optional)
-    video_length = 4  # default assumption for Shorts
+    cursor.execute(
+        "SELECT video_length FROM videos WHERE meme_id = ?", (meme_id,)
+    )
+    row          = cursor.fetchone()
+    video_length = row[0] if row else 4.0
 
     reward = calculate_reward(
         views=metrics["views"],
         likes=metrics["likes"],
         avg_watch_time=metrics["avg_watch_time"],
         completion_rate=metrics["completion_rate"],
-        video_length=video_length
+        video_length=video_length,
     )
 
-    # In feedback_agent.py -> save_analytics()
     cursor.execute("""
-        INSERT INTO analytics (
-            video_id,
-            views,
-            likes,
-            avg_watch_time,
-            completion_rate,
-            reward
-        ) VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO analytics (video_id, views, likes, avg_watch_time, completion_rate, reward)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(video_id) DO UPDATE SET
-            views=excluded.views,
-            likes=excluded.likes,
-            avg_watch_time=excluded.avg_watch_time,
-            completion_rate=excluded.completion_rate,
-            reward=excluded.reward,
-            fetched_at=CURRENT_TIMESTAMP  -- Manually update the timestamp on refresh
+            views            = excluded.views,
+            likes            = excluded.likes,
+            avg_watch_time   = excluded.avg_watch_time,
+            completion_rate  = excluded.completion_rate,
+            reward           = excluded.reward,
+            fetched_at       = CURRENT_TIMESTAMP
     """, (
         video_id,
         metrics["views"],
         metrics["likes"],
         metrics["avg_watch_time"],
         metrics["completion_rate"],
-        reward
+        reward,
     ))
 
     conn.commit()
     conn.close()
+    logger.info(f"Saved analytics for {video_id} — views={metrics['views']} reward={reward:.3f}")
 
 
-# ---- MAIN RUNNER ----
 def run_feedback():
     youtube, analytics = get_services()
-
     videos = get_recent_videos(youtube)
+    logger.info(f"Found {len(videos)} eligible videos.")
 
-    print(f"Found {len(videos)} recent videos with meme_ids.")
+    skipped = saved = 0
 
     for video in videos:
-        get_realtime_data(youtube, video["video_id"])
-        metrics = get_video_analytics(analytics, video["video_id"])
+        vid_id  = video["video_id"]
+        meme_id = video["meme_id"]
 
-        if metrics:
-            print(f"Processing video {video['video_id']} with meme_id {video['meme_id']}")
-            if metrics and metrics["views"] > 0:
-                save_analytics(video["video_id"], video["meme_id"], metrics)
-            else:
-                print(f"Skipping DB save for {video['video_id']}: Analytics data not yet processed by YouTube.")
-            
+        if _already_fetched_recently(vid_id):
+            logger.debug(f"Skipping {vid_id} — fetched within {REFETCH_HOURS}h")
+            skipped += 1
+            continue
+
+        metrics = get_video_analytics(analytics, vid_id)
+
+        if not metrics or metrics["views"] == 0:
+            logger.debug(f"No analytics yet for {vid_id}")
+            continue
+
+        save_analytics(vid_id, meme_id, metrics)
+        saved += 1
+
+    logger.info(f"Feedback complete — {saved} updated, {skipped} skipped.")
 
 
 if __name__ == "__main__":

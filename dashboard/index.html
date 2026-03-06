@@ -1,186 +1,1080 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
-    <title>Meme Bot Dashboard</title>
-
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>MemeBot Analytics</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Libre+Franklin:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
-      body {
-        font-family: Arial, sans-serif;
-        background: #0f0f0f;
-        color: white;
+      /* ─── Reset & Base ─────────────────────────────────────────── */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
         margin: 0;
-        padding: 40px;
+        padding: 0;
       }
 
-      h1 {
-        margin-bottom: 30px;
+      :root {
+        --navy: #0d1b2e;
+        --navy-mid: #152338;
+        --navy-soft: #1d2f47;
+        --rule: #243550;
+        --gold: #c9973a;
+        --gold-pale: #f5e9d3;
+        --sky: #4a9fd4;
+        --sky-pale: #dbeeff;
+        --white: #f8f6f1;
+        --offwhite: #ede9e1;
+        --text-inv: #e8e4dd;
+        --text-dim: #8a9ab0;
+        --text-body: #c5ccda;
+        --green: #3aad6e;
+        --red: #d95f4b;
+        --font-serif: "Playfair Display", Georgia, serif;
+        --font-sans: "Libre Franklin", system-ui, sans-serif;
       }
 
-      .dashboard {
-        max-width: 1200px;
-        margin: auto;
+      html {
+        font-size: 14px;
       }
 
-      /* stat cards */
+      body {
+        background: var(--navy);
+        color: var(--text-inv);
+        font-family: var(--font-sans);
+        font-weight: 400;
+        line-height: 1.6;
+        min-height: 100vh;
+      }
 
-      .stats {
+      /* ─── Layout ───────────────────────────────────────────────── */
+      .shell {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: 200px 1fr;
+        grid-template-rows: auto 1fr;
+        min-height: 100vh;
+      }
+
+      /* ─── Top Bar ──────────────────────────────────────────────── */
+      .topbar {
+        grid-column: 1 / -1;
+        background: var(--navy-mid);
+        border-bottom: 1px solid var(--rule);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 28px;
+        height: 52px;
+      }
+
+      .topbar-left {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+
+      .brand {
+        font-family: var(--font-serif);
+        font-weight: 700;
+        font-size: 18px;
+        color: var(--white);
+        letter-spacing: -0.3px;
+      }
+
+      .brand-divider {
+        width: 1px;
+        height: 16px;
+        background: var(--rule);
+      }
+
+      .brand-sub {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+      }
+
+      .topbar-right {
+        display: flex;
+        align-items: center;
         gap: 20px;
-        margin-bottom: 40px;
+      }
+
+      .live-indicator {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--green);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .live-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--green);
+        animation: pulse 2s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(58, 173, 110, 0.5);
+        }
+        50% {
+          box-shadow: 0 0 0 4px rgba(58, 173, 110, 0);
+        }
+      }
+
+      .timestamp {
+        font-size: 11px;
+        color: var(--text-dim);
+        font-family: var(--font-sans);
+        font-weight: 400;
+      }
+
+      /* ─── Sidebar ──────────────────────────────────────────────── */
+      aside {
+        background: var(--navy-mid);
+        border-right: 1px solid var(--rule);
+        padding: 24px 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      .nav-section {
+        padding: 0 0 20px;
+        border-bottom: 1px solid var(--rule);
+        margin-bottom: 4px;
+      }
+
+      .nav-section:last-of-type {
+        border-bottom: none;
+      }
+
+      .nav-heading {
+        font-size: 9.5px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1.8px;
+        color: var(--text-dim);
+        padding: 12px 20px 6px;
+      }
+
+      .nav-link {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 20px;
+        font-size: 12.5px;
+        font-weight: 400;
+        color: var(--text-body);
+        cursor: pointer;
+        transition:
+          color 0.15s,
+          background 0.15s;
+        border-left: 2px solid transparent;
+        text-decoration: none;
+      }
+
+      .nav-link:hover {
+        color: var(--white);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .nav-link.active {
+        color: var(--gold);
+        border-left-color: var(--gold);
+        background: rgba(201, 151, 58, 0.07);
+        font-weight: 500;
+      }
+
+      .nav-link svg {
+        width: 14px;
+        height: 14px;
+        opacity: 0.7;
+        flex-shrink: 0;
+      }
+
+      .nav-link.active svg {
+        opacity: 1;
+      }
+
+      .sidebar-footer {
+        margin-top: auto;
+        padding: 16px 20px;
+        border-top: 1px solid var(--rule);
+      }
+
+      .sys-status {
+        font-size: 11px;
+        color: var(--text-dim);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      /* ─── Main Content ─────────────────────────────────────────── */
+      main {
+        padding: 32px 36px;
+        overflow-y: auto;
+        background: var(--navy);
+      }
+
+      /* ─── Page Header ──────────────────────────────────────────── */
+      .page-header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        padding-bottom: 20px;
+        border-bottom: 2px solid var(--gold);
+        margin-bottom: 28px;
+        animation: fadeUp 0.4s ease;
+      }
+
+      .page-eyebrow {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        color: var(--gold);
+        margin-bottom: 5px;
+      }
+
+      .page-title {
+        font-family: var(--font-serif);
+        font-size: 26px;
+        font-weight: 700;
+        color: var(--white);
+        letter-spacing: -0.4px;
+        line-height: 1.15;
+      }
+
+      .page-sub {
+        font-size: 12px;
+        color: var(--text-dim);
+        margin-top: 4px;
+      }
+
+      .header-right {
+        text-align: right;
+        font-size: 11.5px;
+        color: var(--text-dim);
+        line-height: 1.7;
+      }
+
+      /* ─── KPI Strip ────────────────────────────────────────────── */
+      .kpi-strip {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0;
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        overflow: hidden;
+        margin-bottom: 24px;
+      }
+
+      .kpi-cell {
+        padding: 22px 24px;
+        border-right: 1px solid var(--rule);
+        background: var(--navy-mid);
+        animation: fadeUp 0.4s ease both;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .kpi-cell::after {
+        content: "";
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+      }
+
+      .kpi-cell:nth-child(1)::after {
+        background: var(--gold);
+        animation-delay: 0.08s;
+      }
+      .kpi-cell:nth-child(2)::after {
+        background: var(--sky);
+        animation-delay: 0.14s;
+      }
+      .kpi-cell:nth-child(3)::after {
+        background: var(--green);
+        animation-delay: 0.2s;
+      }
+      .kpi-cell:last-child {
+        border-right: none;
+      }
+
+      .kpi-label {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: var(--text-dim);
+        margin-bottom: 8px;
+      }
+
+      .kpi-num {
+        font-family: var(--font-serif);
+        font-size: 42px;
+        font-weight: 700;
+        line-height: 1;
+        letter-spacing: -1.5px;
+      }
+
+      .kpi-cell:nth-child(1) .kpi-num {
+        color: var(--gold);
+      }
+      .kpi-cell:nth-child(2) .kpi-num {
+        color: var(--sky);
+      }
+      .kpi-cell:nth-child(3) .kpi-num {
+        color: var(--green);
+      }
+
+      .kpi-desc {
+        font-size: 11.5px;
+        color: var(--text-dim);
+        margin-top: 8px;
+        font-weight: 300;
+      }
+
+      /* ─── Charts Row ───────────────────────────────────────────── */
+      .charts-row {
+        display: grid;
+        grid-template-columns: 1fr 340px;
+        gap: 20px;
+        margin-bottom: 24px;
       }
 
       .card {
-        background: linear-gradient(145deg, #1e1e1e, #161616);
+        background: var(--navy-mid);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        overflow: hidden;
+        animation: fadeUp 0.4s ease both;
+      }
+
+      .card:nth-child(1) {
+        animation-delay: 0.22s;
+      }
+      .card:nth-child(2) {
+        animation-delay: 0.28s;
+      }
+
+      .card-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--rule);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .card-title {
+        font-family: var(--font-serif);
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--white);
+        letter-spacing: -0.2px;
+      }
+
+      .card-meta {
+        font-size: 10.5px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--text-dim);
+      }
+
+      .card-body {
         padding: 20px;
-        border-radius: 12px;
+      }
+
+      /* Donut */
+      .donut-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .donut-label {
+        position: absolute;
         text-align: center;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        pointer-events: none;
       }
 
-      .card h3 {
-        margin: 0;
-        font-size: 14px;
-        color: #bbb;
+      .donut-label .n {
+        font-family: var(--font-serif);
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--white);
+        line-height: 1;
       }
 
-      .card p {
-        font-size: 26px;
-        margin-top: 10px;
-        font-weight: bold;
+      .donut-label .t {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--text-dim);
+        margin-top: 4px;
       }
 
-      /* charts */
-
-      .chart-container {
-        background: #1b1b1b;
-        padding: 20px;
-        border-radius: 12px;
-        margin-bottom: 30px;
+      /* Legend */
+      .legend {
+        margin-top: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
       }
 
-      canvas {
-        background: white;
-        border-radius: 8px;
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11.5px;
+        color: var(--text-body);
       }
 
-      /* loading */
+      .legend-swatch {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
 
-      .loading {
-        color: #aaa;
+      .legend-name {
+        flex: 1;
+      }
+      .legend-val {
+        font-weight: 500;
+        color: var(--white);
+        font-family: var(--font-serif);
+      }
+
+      /* ─── Data Table ───────────────────────────────────────────── */
+      .table-card {
+        background: var(--navy-mid);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        overflow: hidden;
+        animation: fadeUp 0.4s ease 0.32s both;
+      }
+
+      .table-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--rule);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .table-count {
+        font-size: 11px;
+        color: var(--text-dim);
+        background: var(--navy-soft);
+        border: 1px solid var(--rule);
+        padding: 3px 9px;
+        border-radius: 3px;
+        font-weight: 500;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      thead {
+        background: var(--navy-soft);
+        border-bottom: 1px solid var(--rule);
+      }
+
+      thead th {
+        padding: 10px 18px;
+        font-size: 9.5px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: var(--text-dim);
+        text-align: left;
+        white-space: nowrap;
+      }
+
+      thead th:last-child {
+        text-align: right;
+      }
+
+      tbody tr {
+        border-bottom: 1px solid rgba(36, 53, 80, 0.7);
+        transition: background 0.1s;
+      }
+
+      tbody tr:last-child {
+        border-bottom: none;
+      }
+
+      tbody tr:hover {
+        background: rgba(255, 255, 255, 0.025);
+      }
+
+      td {
+        padding: 11px 18px;
+        vertical-align: middle;
+      }
+
+      .td-name {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: 600;
+        flex-shrink: 0;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .td-label {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--white);
+      }
+
+      .td-sub {
+        font-size: 11px;
+        color: var(--text-dim);
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 11px;
+        font-weight: 500;
+        padding: 3px 9px;
+        border-radius: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .status-active {
+        background: rgba(58, 173, 110, 0.12);
+        color: #5dcb92;
+        border: 1px solid rgba(58, 173, 110, 0.25);
+      }
+
+      .status-idle {
+        background: rgba(138, 154, 176, 0.08);
+        color: var(--text-dim);
+        border: 1px solid var(--rule);
+      }
+
+      .bar-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .bar-track {
+        flex: 1;
+        height: 4px;
+        background: var(--navy-soft);
+        border-radius: 99px;
+        overflow: hidden;
+        min-width: 60px;
+      }
+
+      .bar-fill {
+        height: 100%;
+        border-radius: 99px;
+        transition: width 1s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      .bar-num {
+        font-family: var(--font-serif);
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--white);
+        min-width: 14px;
+        text-align: right;
+      }
+
+      .reward-val {
+        text-align: right;
+        font-size: 12.5px;
+        color: var(--text-dim);
+        font-family: var(--font-sans);
+      }
+
+      /* ─── Footer ───────────────────────────────────────────────── */
+      .footer {
+        margin-top: 24px;
+        padding-top: 16px;
+        border-top: 1px solid var(--rule);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 11px;
+        color: var(--text-dim);
+      }
+
+      /* ─── Animations ───────────────────────────────────────────── */
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      /* ─── Responsive ───────────────────────────────────────────── */
+      @media (max-width: 960px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+        aside {
+          display: none;
+        }
+        .charts-row {
+          grid-template-columns: 1fr;
+        }
+        .kpi-strip {
+          grid-template-columns: 1fr;
+        }
+        .kpi-cell {
+          border-right: none;
+          border-bottom: 1px solid var(--rule);
+        }
       }
     </style>
   </head>
-
   <body>
-    <div class="dashboard">
-      <h1>📊 Meme AI Dashboard</h1>
+    <div class="shell">
+      <!-- Top Bar -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <span class="brand">MemeBot</span>
+          <span class="brand-divider"></span>
+          <span class="brand-sub">Analytics Platform</span>
+        </div>
+        <div class="topbar-right">
+          <div class="live-indicator">
+            <span class="live-dot"></span>
+            Live
+          </div>
+          <span class="timestamp" id="ts"></span>
+        </div>
+      </header>
 
-      <div id="stats" class="stats loading">Loading dashboard...</div>
+      <!-- Sidebar -->
+      <aside>
+        <div class="nav-section">
+          <div class="nav-heading">Analytics</div>
+          <a class="nav-link active" href="#">
+            <svg
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              viewBox="0 0 24 24"
+            >
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+            Overview
+          </a>
+          <!-- <a class="nav-link" href="#">
+            <svg
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              viewBox="0 0 24 24"
+            >
+              <path d="M3 3v18h18" />
+              <path d="M7 16l4-4 4 4 4-6" />
+            </svg>
+            Performance
+          </a>
+          <a class="nav-link" href="#">
+            <svg
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v5l3 3" />
+            </svg>
+            History
+          </a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-heading">Content</div>
+          <a class="nav-link" href="#">
+            <svg
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              viewBox="0 0 24 24"
+            >
+              <rect x="4" y="4" width="16" height="16" rx="2" />
+              <path d="M4 9h16M9 4v5" />
+            </svg>
+            Subreddits
+          </a>
+          <a class="nav-link" href="#">
+            <svg
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              viewBox="0 0 24 24"
+            >
+              <path
+                d="M15 10l4.553-2.07A1 1 0 0121 8.87V16a1 1 0 01-1.447.894L15 15M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"
+              />
+            </svg>
+            Videos
+          </a>
+          <a class="nav-link" href="#">
+            <svg
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              viewBox="0 0 24 24"
+            >
+              <path
+                d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
+              />
+            </svg>
+            Rewards
+          </a>
+        </div>
+        <div class="sidebar-footer">
+          <div class="sys-status">
+            <span
+              class="live-dot"
+              style="
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+                background: var(--green);
+                flex-shrink: 0;
+              "
+            ></span>
+            All systems normal
+          </div> -->
+        </div>
+      </aside>
 
-      <div class="chart-container">
-        <h2>Subreddit Reward Performance</h2>
-        <canvas id="rewardChart"></canvas>
-      </div>
+      <!-- Main -->
+      <main>
+        <!-- Page Header -->
+        <div class="page-header">
+          <div>
+            <div class="page-eyebrow">Dashboard</div>
+            <div class="page-title">Content Performance Overview</div>
+            <div class="page-sub">
+              Tracking 21 subreddits · Generation &amp; reward analytics
+            </div>
+          </div>
+          <div class="header-right" id="headerDate"></div>
+        </div>
 
-      <div class="chart-container">
-        <h2>Videos Generated per Subreddit</h2>
-        <canvas id="videoChart"></canvas>
-      </div>
+        <!-- KPI Strip -->
+        <div class="kpi-strip">
+          <div class="kpi-cell">
+            <div class="kpi-label">Total Memes</div>
+            <div class="kpi-num">217</div>
+            <div class="kpi-desc">Scraped and processed</div>
+          </div>
+          <div class="kpi-cell">
+            <div class="kpi-label">Videos Generated</div>
+            <div class="kpi-num">6</div>
+            <div class="kpi-desc">Across 5 active subreddits</div>
+          </div>
+          <div class="kpi-cell">
+            <div class="kpi-label">Avg. Reward Signal</div>
+            <div class="kpi-num">0.235</div>
+            <div class="kpi-desc">Reinforcement learning score</div>
+          </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-row">
+          <!-- Bar Chart -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">Videos per Subreddit</div>
+              <div class="card-meta">Active sources</div>
+            </div>
+            <div class="card-body">
+              <canvas id="barChart" height="180"></canvas>
+            </div>
+          </div>
+
+          <!-- Donut -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">Source Activity</div>
+              <div class="card-meta">Distribution</div>
+            </div>
+            <div class="card-body">
+              <div class="donut-wrap">
+                <canvas id="donutChart" height="180"></canvas>
+                <div class="donut-label">
+                  <div class="n">21</div>
+                  <div class="t">Sources</div>
+                </div>
+              </div>
+              <div class="legend" id="legend"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Table -->
+        <div class="table-card">
+          <div class="table-header">
+            <div class="card-title">Subreddit Breakdown</div>
+            <div class="table-count">21 Sources</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 36px">#</th>
+                <th>Subreddit</th>
+                <th>Status</th>
+                <th>Videos</th>
+                <th>Avg. Reward</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+
+        <div class="footer">
+          <span>MemeBot Analytics Platform &mdash; v2.0</span>
+          <span id="footerTs"></span>
+        </div>
+      </main>
     </div>
 
     <script>
-      fetch("data.json")
-        .then((r) => r.json())
-        .then((data) => {
-          /* ---------- stats ---------- */
+      /* ── Data ─────────────────────────────────────────────────── */
+      const data = {
+        subreddits: [
+          { s: "funny", v: 2, r: null },
+          { s: "TeenagersButBetter", v: 1, r: null },
+          { s: "comedyheaven", v: 1, r: null },
+          { s: "me_irl", v: 1, r: null },
+          { s: "okbuddybaka", v: 1, r: null },
+          { s: "196", v: 0, r: null },
+          { s: "2meirl4meirl", v: 0, r: null },
+          { s: "AdviceAnimals", v: 0, r: null },
+          { s: "ComedyCemetery", v: 0, r: null },
+          { s: "HistoryMemes", v: 0, r: null },
+          { s: "HolUp", v: 0, r: null },
+          { s: "LeagueOfMemes", v: 0, r: null },
+          { s: "MinecraftMemes", v: 0, r: null },
+          { s: "ProgrammerHumor", v: 0, r: null },
+          { s: "dankchristianmemes", v: 0, r: null },
+          { s: "dankmemes", v: 0, r: null },
+          { s: "meirl", v: 0, r: null },
+          { s: "memes", v: 0, r: null },
+          { s: "okbuddyretard", v: 0, r: null },
+          { s: "terriblefacebookmemes", v: 0, r: null },
+          { s: "wholesomememes", v: 0, r: null },
+        ],
+      };
 
-          document.getElementById("stats").innerHTML = `
+      /* ── Palette ──────────────────────────────────────────────── */
+      const PALETTE = [
+        "#c9973a",
+        "#4a9fd4",
+        "#3aad6e",
+        "#d95f4b",
+        "#9b6fd4",
+        "#4ac4bf",
+        "#d48a4a",
+        "#6fa8d4",
+      ];
 
-<div class="card">
-<h3>Total Memes</h3>
-<p>${data.total_memes}</p>
-</div>
-
-<div class="card">
-<h3>Total Videos</h3>
-<p>${data.total_videos}</p>
-</div>
-
-<div class="card">
-<h3>Average Reward</h3>
-<p>${data.avg_reward?.toFixed(3) ?? "0"}</p>
-</div>
-
-`;
-
-          /* ---------- empty data protection ---------- */
-
-          if (!data.subreddits || data.subreddits.length === 0) {
-            console.warn("No subreddit analytics yet");
-            return;
-          }
-
-          const labels = data.subreddits.map((s) => s.subreddit);
-          const rewards = data.subreddits.map((s) => s.avg_reward ?? 0);
-          const videos = data.subreddits.map((s) => s.videos ?? 0);
-
-          /* ---------- reward chart ---------- */
-
-          new Chart(document.getElementById("rewardChart"), {
-            type: "bar",
-            data: {
-              labels: labels,
-              datasets: [
-                {
-                  label: "Average Reward",
-                  data: rewards,
-                  backgroundColor: "#4cafef",
-                },
-              ],
-            },
-            options: {
-              responsive: true,
-              plugins: {
-                legend: { display: false },
-              },
-              scales: {
-                y: {
-                  beginAtZero: true,
-                },
-              },
-            },
-          });
-
-          /* ---------- video chart ---------- */
-
-          new Chart(document.getElementById("videoChart"), {
-            type: "bar",
-            data: {
-              labels: labels,
-              datasets: [
-                {
-                  label: "Videos",
-                  data: videos,
-                  backgroundColor: "#66bb6a",
-                },
-              ],
-            },
-            options: {
-              responsive: true,
-              plugins: {
-                legend: { display: false },
-              },
-              scales: {
-                y: {
-                  beginAtZero: true,
-                },
-              },
-            },
-          });
+      /* ── Dates ────────────────────────────────────────────────── */
+      const now = new Date();
+      const fmt = (d) =>
+        d.toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
         });
+      const fmtT = (d) =>
+        d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+      document.getElementById("ts").textContent = fmtT(now);
+      document.getElementById("footerTs").textContent =
+        "Last updated: " + fmt(now) + " · " + fmtT(now);
+      document.getElementById("headerDate").innerHTML =
+        `<strong style="color:var(--text-inv);font-size:13px;">${fmt(now)}</strong><br>
+   <span style="font-size:11px">Reporting period: all-time</span>`;
+
+      /* ── Table ────────────────────────────────────────────────── */
+      const maxV = Math.max(...data.subreddits.map((d) => d.v));
+      document.getElementById("tableBody").innerHTML = data.subreddits
+        .map((d, i) => {
+          const color = PALETTE[i % PALETTE.length];
+          const pct = maxV > 0 ? (d.v / maxV) * 100 : 0;
+          const init = d.s.slice(0, 2).toUpperCase();
+          return `
+  <tr>
+    <td style="font-size:11px;color:var(--text-dim);font-weight:400">${String(i + 1).padStart(2, "0")}</td>
+    <td>
+      <div class="td-name">
+        <div class="avatar" style="background:${color}18;color:${color}">${init}</div>
+        <div>
+          <div class="td-label">r/${d.s}</div>
+        </div>
+      </div>
+    </td>
+    <td>
+      <span class="status-pill ${d.v > 0 ? "status-active" : "status-idle"}">
+        ${d.v > 0 ? "▲ Active" : "— Idle"}
+      </span>
+    </td>
+    <td>
+      <div class="bar-row">
+        <div class="bar-track">
+          <div class="bar-fill" style="width:${pct}%;background:${color}"></div>
+        </div>
+        <span class="bar-num">${d.v}</span>
+      </div>
+    </td>
+    <td class="reward-val">${d.r != null ? d.r.toFixed(3) : "—"}</td>
+  </tr>`;
+        })
+        .join("");
+
+      /* ── Chart defaults ───────────────────────────────────────── */
+      Chart.defaults.color = "#8a9ab0";
+      Chart.defaults.borderColor = "#243550";
+      Chart.defaults.font.family = "'Libre Franklin', sans-serif";
+      Chart.defaults.font.size = 11;
+
+      /* ── Bar Chart ────────────────────────────────────────────── */
+      const active = data.subreddits.filter((d) => d.v > 0);
+      new Chart(document.getElementById("barChart"), {
+        type: "bar",
+        data: {
+          labels: active.map((d) => "r/" + d.s),
+          datasets: [
+            {
+              data: active.map((d) => d.v),
+              backgroundColor: active.map(
+                (_, i) => PALETTE[i % PALETTE.length] + "25",
+              ),
+              borderColor: active.map((_, i) => PALETTE[i % PALETTE.length]),
+              borderWidth: 1.5,
+              borderRadius: 3,
+              borderSkipped: false,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: "#1d2f47",
+              borderColor: "#243550",
+              borderWidth: 1,
+              padding: 10,
+              callbacks: {
+                label: (c) =>
+                  "  " + c.raw + " video" + (c.raw !== 1 ? "s" : ""),
+              },
+            },
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+            y: {
+              beginAtZero: true,
+              ticks: { stepSize: 1, font: { size: 11 } },
+              grid: { color: "rgba(36,53,80,0.8)" },
+            },
+          },
+        },
+      });
+
+      /* ── Donut Chart ──────────────────────────────────────────── */
+      new Chart(document.getElementById("donutChart"), {
+        type: "doughnut",
+        data: {
+          labels: data.subreddits.map((d) => "r/" + d.s),
+          datasets: [
+            {
+              data: data.subreddits.map((d) => Math.max(d.v, 0.35)),
+              backgroundColor: data.subreddits.map(
+                (_, i) => PALETTE[i % PALETTE.length] + "30",
+              ),
+              borderColor: data.subreddits.map(
+                (_, i) => PALETTE[i % PALETTE.length],
+              ),
+              borderWidth: 1.5,
+              hoverOffset: 5,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          cutout: "68%",
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: "#1d2f47",
+              borderColor: "#243550",
+              borderWidth: 1,
+              padding: 10,
+              callbacks: {
+                label: (c) =>
+                  ` ${c.label}: ${data.subreddits[c.dataIndex].v} videos`,
+              },
+            },
+          },
+        },
+      });
+
+      /* ── Mini Legend (active only) ────────────────────────────── */
+      document.getElementById("legend").innerHTML = active
+        .map(
+          (d, i) => `
+  <div class="legend-item">
+    <div class="legend-swatch" style="background:${PALETTE[i % PALETTE.length]}"></div>
+    <span class="legend-name">r/${d.s}</span>
+    <span class="legend-val">${d.v}</span>
+  </div>`,
+        )
+        .join("");
     </script>
   </body>
 </html>

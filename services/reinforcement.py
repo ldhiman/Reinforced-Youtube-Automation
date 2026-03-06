@@ -1,197 +1,106 @@
-import sqlite3
+import logging
 from collections import defaultdict
 from db import get_connection
 
+logger = logging.getLogger(__name__)
 
-LEARNING_RATE = 0.08
-MIN_WEIGHT = 0.2
-MAX_WEIGHT = 4.0
-MIN_SAMPLES = 5
-RECENT_DAYS = 21
-VIEW_SMOOTH_K = 2000  # confidence smoothing
+LEARNING_RATE  = 0.08
+MIN_WEIGHT     = 0.2
+MAX_WEIGHT     = 4.0
+MIN_SAMPLES    = 3        # raise to 3-5 once you have more data
+RECENT_DAYS    = 21
+VIEW_SMOOTH_K  = 2000
 
-def fetch_template_rewards(cursor):
+
+def _fetch_grouped(cursor, group_col: str) -> dict:
+    """Generic fetch — groups analytics by subreddit or template."""
     cursor.execute(f"""
-        SELECT m.template, a.reward, a.views
+        SELECT m.{group_col}, a.reward, a.views
         FROM analytics a
-        JOIN videos v ON a.video_id = v.video_id
-        JOIN memes m ON v.meme_id = m.meme_id
-        WHERE a.reward IS NOT NULL
-        AND a.fetched_at >= datetime('now', '-{RECENT_DAYS} days')
+        JOIN videos v  ON a.video_id = v.video_id
+        JOIN memes  m  ON v.meme_id  = m.meme_id
+        WHERE a.reward     IS NOT NULL
+          AND a.fetched_at >= datetime('now', '-{RECENT_DAYS} days')
     """)
-
-    rows = cursor.fetchall()
-
     grouped = defaultdict(list)
-
-    for template, reward, views in rows:
-        grouped[template].append((reward, views))
-
-    return grouped
-
-def fetch_reward_data(cursor):
-    cursor.execute(f"""
-        SELECT m.subreddit, a.reward, a.views
-        FROM analytics a
-        JOIN videos v ON a.video_id = v.video_id
-        JOIN memes m ON v.meme_id = m.meme_id
-        WHERE a.reward IS NOT NULL
-        AND a.fetched_at >= datetime('now', '-{RECENT_DAYS} days')
-    """)
-
-    rows = cursor.fetchall()
-
-    grouped = defaultdict(list)
-
-    for subreddit, reward, views in rows:
-        grouped[subreddit].append({
-            "reward": reward,
-            "views": views
-        })
-
+    for key, reward, views in cursor.fetchall():
+        grouped[key].append({"reward": float(reward), "views": int(views)})
     return grouped
 
 
-def get_global_average(grouped):
-    all_rewards = []
-
-    for rewards in grouped.values():
-        for r in rewards:
-            all_rewards.append(r["reward"])
-
-    if not all_rewards:
-        return 0.0
-
-    return sum(all_rewards) / len(all_rewards)
+def _global_avg(grouped: dict) -> float:
+    all_rewards = [r["reward"] for rows in grouped.values() for r in rows]
+    return sum(all_rewards) / len(all_rewards) if all_rewards else 0.0
 
 
-def compute_subreddit_stats(rewards):
-    total_views = sum(r["views"] for r in rewards)
-    avg_reward = sum(r["reward"] for r in rewards) / len(rewards)
+def _update_weight_table(cursor, table: str, key_col: str, grouped: dict, global_avg: float):
+    updated = skipped = 0
 
-    confidence = total_views / (total_views + VIEW_SMOOTH_K)
-
-    return avg_reward, confidence
-
-def update_template_weights():
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    grouped = fetch_template_rewards(cursor)
-
-    print(f"Updating weights for {len(grouped)} subreddits")
-
-    if not grouped:
-        conn.close()
-        return
-    
-    # compute global average reward
-    all_rewards = []
-    for rewards in grouped.values():
-        for r, _ in rewards:
-            all_rewards.append(r)
-
-    global_avg = sum(all_rewards) / len(all_rewards)
-
-    for template, rewards in grouped.items():
-
+    for key, rewards in grouped.items():
         if len(rewards) < MIN_SAMPLES:
+            logger.debug(f"[{table}] '{key}' skipped — only {len(rewards)} sample(s)")
+            skipped += 1
             continue
 
-        total_views = sum(v for _, v in rewards)
-        avg_reward = sum(r for r, _ in rewards) / len(rewards)
-
-        confidence = total_views / (total_views + VIEW_SMOOTH_K)
+        total_views = sum(r["views"] for r in rewards)
+        avg_reward  = sum(r["reward"] for r in rewards) / len(rewards)
+        confidence  = total_views / (total_views + VIEW_SMOOTH_K)
 
         cursor.execute(
-            "SELECT weight FROM template_weights WHERE template = ?",
-            (template,)
+            f"SELECT weight FROM {table} WHERE {key_col} = ?", (key,)
         )
-
-        row = cursor.fetchone()
+        row        = cursor.fetchone()
         old_weight = row[0] if row else 1.0
 
-        delta = avg_reward - global_avg
-        adjusted_delta = delta * confidence
+        delta      = (avg_reward - global_avg) * confidence
+        new_weight = max(MIN_WEIGHT, min(MAX_WEIGHT, old_weight + LEARNING_RATE * delta))
 
-        new_weight = old_weight + LEARNING_RATE * adjusted_delta
+        cursor.execute(f"""
+            INSERT INTO {table} ({key_col}, weight) VALUES (?, ?)
+            ON CONFLICT({key_col}) DO UPDATE SET weight = excluded.weight
+        """, (key, round(new_weight, 4)))
 
-        new_weight = max(MIN_WEIGHT, min(MAX_WEIGHT, new_weight))
+        logger.info(
+            f"[{table}] '{key}' | "
+            f"{round(old_weight, 3)} → {round(new_weight, 3)} | "
+            f"conf={round(confidence, 3)} | "
+            f"samples={len(rewards)} | "
+            f"avg_reward={round(avg_reward, 4)}"
+        )
+        updated += 1
 
-        cursor.execute("""
-            INSERT INTO template_weights (template, weight)
-            VALUES (?, ?)
-            ON CONFLICT(template)
-            DO UPDATE SET weight = excluded.weight
-        """, (template, new_weight))
+    logger.info(f"[{table}] {updated} updated, {skipped} skipped (< {MIN_SAMPLES} samples)")
 
-    conn.commit()
-    conn.close()
 
 def update_weights():
-    conn = get_connection()
+    conn   = get_connection()
     cursor = conn.cursor()
 
-    grouped = fetch_reward_data(cursor)
+    try:
+        # --- Subreddit weights ---
+        sub_grouped = _fetch_grouped(cursor, "subreddit")
+        if not sub_grouped:
+            logger.warning("No reward data yet — run feedback_agent first.")
+            return
 
-    print(f"Updating weights for {len(grouped)} subreddits")
+        global_avg = _global_avg(sub_grouped)
+        logger.info(f"Global avg reward: {round(global_avg, 4)} | subreddits: {len(sub_grouped)}")
+        _update_weight_table(cursor, "subreddit_weights", "subreddit", sub_grouped, global_avg)
 
-    if not grouped:
-        print("No reward data yet.")
+        # --- Template weights (only useful with larger datasets) ---
+        tpl_grouped = _fetch_grouped(cursor, "template")
+        if tpl_grouped:
+            tpl_global_avg = _global_avg(tpl_grouped)
+            _update_weight_table(cursor, "template_weights", "template", tpl_grouped, tpl_global_avg)
+        else:
+            logger.debug("No template data yet, skipping template weights.")
+
+        conn.commit()
+
+    finally:
         conn.close()
-        return
-
-    global_avg = get_global_average(grouped)
-
-    print(f"\nGlobal Avg Reward: {round(global_avg, 4)}\n")
-
-    for subreddit, rewards in grouped.items():
-
-        if len(rewards) < MIN_SAMPLES:
-            print(f"{subreddit} skipped (only {len(rewards)} samples)")
-            continue
-
-        sub_avg, confidence = compute_subreddit_stats(rewards)
-
-        cursor.execute(
-            "SELECT weight FROM subreddit_weights WHERE subreddit = ?",
-            (subreddit,)
-        )
-        row = cursor.fetchone()
-        old_weight = row[0] if row else 1.0
-
-        delta = sub_avg - global_avg
-
-        # 🔥 Confidence-weighted update
-        adjusted_delta = delta * confidence
-
-        new_weight = old_weight + LEARNING_RATE * adjusted_delta
-
-        new_weight = max(MIN_WEIGHT, min(MAX_WEIGHT, new_weight))
-
-        cursor.execute("""
-            INSERT INTO subreddit_weights (subreddit, weight)
-            VALUES (?, ?)
-            ON CONFLICT(subreddit)
-            DO UPDATE SET weight = excluded.weight
-        """, (subreddit, new_weight))
-
-        print(
-            f"{subreddit} | "
-            f"Old: {round(old_weight,3)} → "
-            f"New: {round(new_weight,3)} | "
-            f"Conf: {round(confidence,3)} | "
-            f"Samples: {len(rewards)} | "
-            f"Sub Avg: {round(sub_avg,4)}"
-        )
-
-    conn.commit()
-    conn.close()
-
-    
-    update_template_weights()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     update_weights()

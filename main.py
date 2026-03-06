@@ -1,9 +1,10 @@
 import uuid
-import sqlite3
 import logging
+import time
+from contextlib import contextmanager
 from typing import List
 
-from db import init_db, DB_PATH
+from db import init_db, get_connection
 from services.image_fetcher import fetch_memes
 from services.quality_evaluator import evaluate_memes
 from services.selector import select_memes
@@ -11,177 +12,160 @@ from services.video_editor import insert_memes
 from services.telegram_sender import upload_to_telegram
 from services.feedback_agent import run_feedback
 from services.reinforcement import update_weights
-import datetime
-import random
 
-random.seed(datetime.date.today().toordinal())
 
 # -----------------------------
 # CONFIG
 # -----------------------------
-ALL_SUBREDDITS = [
-    "memes",
+
+UPLOAD_COUNT = 1  # Increase to 5 when scaling
+
+HIGH_PRIORITY_SUBREDDITS: List[str] = [
     "dankmemes",
-    "me_irl",
     "wholesomememes",
-    "okbuddyretard",
+    "memes",
     "funny",
-    "comedyheaven",
-    "ComedyCemetery",
     "terriblefacebookmemes",
+]
+
+MEDIUM_PRIORITY_SUBREDDITS: List[str] = [
     "MinecraftMemes",
     "LeagueOfMemes",
     "HistoryMemes",
-    "ProgrammerHumor",
-    "HolUp",
+    "me_irl",
 ]
 
-MEMES_PER_SUB = 5
-DAILY_UPLOAD_COUNT = 3   # Change to 5 when scaling
-MIN_UPVOTES = 100
+LOW_PRIORITY_SUBREDDITS: List[str] = [
+    "ProgrammerHumor",
+    "HolUp",
+    "comedyheaven",
+    "ComedyCemetery",
+    "okbuddyretard",
+]
 
-SUBREDDITS = random.sample(ALL_SUBREDDITS, 12)
-
+# (subreddits, per_sub, min_upvotes)
+FETCH_CONFIG = [
+    (HIGH_PRIORITY_SUBREDDITS,   10, 1500),
+    (MEDIUM_PRIORITY_SUBREDDITS, 3, 1000),
+    (LOW_PRIORITY_SUBREDDITS,    1,  500),
+]
 
 RUN_FEEDBACK_AFTER_UPLOAD = False
 RUN_REINFORCEMENT_AFTER_FEEDBACK = False
 
-
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 
 # -----------------------------
 # DB HELPERS
 # -----------------------------
+
+@contextmanager
+def get_db():
+    conn = get_connection()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def register_video(video_id: str, meme_id: str, hook_style: str, video_length: float):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        INSERT INTO videos (
-            video_id,
-            meme_id,
-            hook_style,
-            music_type,
-            video_length
-        ) VALUES (?, ?, ?, ?, ?)
-    """, (
-        video_id,
-        meme_id,
-        hook_style,
-        "default",
-        video_length
-    ))
-
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO videos (video_id, meme_id, hook_style, music_type, video_length)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (video_id, meme_id, hook_style, "default", video_length),
+        )
 
 
 def mark_meme_used(meme_id: str):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "UPDATE memes SET used = 1, status = 'rendered' WHERE meme_id = ?",
-        (meme_id,)
-    )
-
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE memes SET used = 1, status = 'rendered' WHERE meme_id = ?",
+            (meme_id,),
+        )
 
 
-def build_description(
-    meme_id: str,
-    subreddit: str,
-    hook_style: str,
-    music_type: str,
-    video_length: float,
-    base_caption: str = "Follow for more 🔥"
-) -> str:
-
+def build_description(meme_id: str, subreddit: str, base_caption: str = "Follow for more 🔥") -> str:
     meta_block = (
         "\n\n---META---\n"
         f"id={meme_id}\n"
         f"sub={subreddit}\n"
-        f"hook={hook_style}\n"
-        f"music={music_type}\n"
-        f"length={video_length}\n"
         "---END---"
     )
+    return f"{base_caption}\n\n#shorts #memes{meta_block}"
 
-    hashtags = "\n\n#shorts #memes"
 
-    return f"{base_caption}{hashtags}{meta_block}"
+# -----------------------------
+# PIPELINE STEPS
+# -----------------------------
+
+def fetch_all_memes():
+    for subreddits, per_sub, min_upvotes in FETCH_CONFIG:
+        count = len(fetch_memes(subreddits, per_sub, min_upvotes))
+        logging.info(f"Got {count} Meme Downloaded for {subreddits}")
+
+
+def process_meme(meme: dict) -> None:
+    """Render, upload, and record a single meme."""
+    meme_id = meme["meme_id"]
+    start = time.monotonic()
+
+    video_path = insert_memes(meme_paths=[meme["image_path"]])
+    video_length = 3.0
+
+    video_id = str(uuid.uuid4())
+    title = meme.get("title") or "Relatable Meme"
+    description = build_description(meme_id=meme_id, subreddit=meme["subreddit"])
+
+    upload_to_telegram(video_path=video_path, title=title, description=description)
+
+    register_video(video_id=video_id, meme_id=meme_id, hook_style="default", video_length=video_length)
+    mark_meme_used(meme_id)
+
+    logger.info(f"Completed meme {meme_id} in {time.monotonic() - start:.1f}s")
+
 
 # -----------------------------
 # MAIN PIPELINE
 # -----------------------------
-def main():
 
+def main():
     logger.info("Initializing database...")
     init_db()
 
     logger.info("Fetching new memes...")
-    fetch_memes(
-        subreddits=SUBREDDITS,
-        per_subreddit=MEMES_PER_SUB,
-        min_upvotes=MIN_UPVOTES
-    )
+    fetch_all_memes()
 
     logger.info("Evaluating memes...")
     evaluate_memes()
 
     logger.info("Selecting memes for today...")
-    selected = select_memes(DAILY_UPLOAD_COUNT)
+    selected = select_memes(UPLOAD_COUNT)
 
     if not selected:
-        logger.info("No memes selected.")
+        logger.info("No memes selected. Exiting.")
         return
 
+    succeeded, failed = 0, 0
     for meme in selected:
-
+        logger.info(f"Processing meme: {meme['meme_id']}")
         try:
-            logger.info(f"Rendering meme: {meme['meme_id']}")
-
-            video_path = insert_memes(
-                meme_paths=[meme["image_path"]],
-            )
-
-            video_id = str(uuid.uuid4())
-
-            title = meme.get("title", "Relatable Meme")
-            description = build_description(
-                meme_id=meme["meme_id"],
-                subreddit=meme["subreddit"],
-                hook_style="default",
-                music_type="default",
-                video_length=3.0
-            )
-
-            logger.info("Uploading to Telegram...")
-            upload_to_telegram(
-                video_path=video_path,
-                title=title,
-                description=description,
-            )
-
-            register_video(
-                video_id=video_id,
-                meme_id=meme["meme_id"],
-                hook_style="default",
-                video_length=3.0
-            )
-
-            mark_meme_used(meme["meme_id"])
-
-            logger.info(f"Completed meme: {meme['meme_id']}")
-
+            process_meme(meme)
+            succeeded += 1
         except Exception as e:
-            logger.error(f"Error processing meme {meme['meme_id']}: {e}")
-            continue
+            logger.error(f"Error processing meme {meme['meme_id']}: {e}", exc_info=True)
+            failed += 1
 
-    # Optional feedback loop
+    logger.info(f"Pipeline complete — {succeeded} uploaded, {failed} failed.")
+
     if RUN_FEEDBACK_AFTER_UPLOAD:
         logger.info("Running feedback agent...")
         run_feedback()

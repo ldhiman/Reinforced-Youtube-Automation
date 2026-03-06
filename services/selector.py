@@ -1,9 +1,7 @@
-import sqlite3
 import random
+import os
 from collections import defaultdict
 from db import get_connection
-import os
-import random
 
 EXPLORATION_RATE = 0.15
 TOP_K = 5
@@ -13,40 +11,38 @@ TOP_K = 5
 # Fetch subreddit weights
 # ---------------------------
 def get_subreddit_weights(cursor):
+
     cursor.execute("SELECT subreddit, weight FROM subreddit_weights")
-    rows = cursor.fetchall()
-    return {sub: weight for sub, weight in rows}
+
+    return {
+        subreddit: weight
+        for subreddit, weight in cursor.fetchall()
+    }
 
 
 # ---------------------------
 # Fetch available memes grouped
 # ---------------------------
 def fetch_memes_grouped(cursor):
+
     cursor.execute("""
         SELECT meme_id, subreddit, final_score, image_path
         FROM memes
         WHERE final_score IS NOT NULL
           AND used = 0
+        ORDER BY final_score DESC
     """)
-
-    rows = cursor.fetchall()
 
     grouped = defaultdict(list)
 
-    for meme_id, subreddit, score, image_path in rows:
+    for meme_id, subreddit, score, image_path in cursor.fetchall():
+
         grouped[subreddit].append({
             "meme_id": meme_id,
             "subreddit": subreddit,
             "final_score": score,
             "image_path": image_path
         })
-
-    # Sort each subreddit by score descending
-    for subreddit in grouped:
-        grouped[subreddit].sort(
-            key=lambda x: x["final_score"],
-            reverse=True
-        )
 
     return grouped
 
@@ -55,76 +51,119 @@ def fetch_memes_grouped(cursor):
 # Weighted subreddit selection
 # ---------------------------
 def weighted_subreddit_choice(grouped, weights):
-    available_subs = list(grouped.keys())
 
-    if not available_subs:
+    available = list(grouped.keys())
+
+    if not available:
         return None
 
-    weighted_list = []
-    for sub in available_subs:
-        weight = weights.get(sub, 1.0)
-        weighted_list.append(max(weight, 0.01))  # prevent zero probability
+    probs = [
+        max(weights.get(sub, 1.0), 0.01)
+        for sub in available
+    ]
 
-    return random.choices(available_subs, weights=weighted_list, k=1)[0]
+    return random.choices(available, weights=probs, k=1)[0]
+
+
+# ---------------------------
+# Remove missing files
+# ---------------------------
+def remove_missing_files(cursor):
+
+    cursor.execute("""
+        SELECT meme_id, image_path
+        FROM memes
+        WHERE used = 0
+    """)
+
+    rows = cursor.fetchall()
+
+    removed = 0
+
+    for meme_id, path in rows:
+
+        if not path or not os.path.exists(path):
+
+            cursor.execute(
+                "DELETE FROM memes WHERE meme_id = ?",
+                (meme_id,)
+            )
+
+            removed += 1
+
+    if removed:
+        print(f"Cleaned {removed} missing meme files")
 
 
 # ---------------------------
 # Main Selection Function
 # ---------------------------
 def select_memes(daily_count: int = 5):
+
     conn = get_connection()
     cursor = conn.cursor()
 
     remove_missing_files(cursor)
+    conn.commit()
 
     grouped = fetch_memes_grouped(cursor)
     weights = get_subreddit_weights(cursor)
 
     selected = []
-    used_local = set()
+    used_memes = set()
 
     if not grouped:
         conn.close()
         return []
 
-    while len(selected) < daily_count and grouped:
+    print("Total available memes:", sum(len(v) for v in grouped.values()))
+    print("Subreddit distribution:", {k: len(v) for k,v in grouped.items()})
+
+    attempts = 0
+    MAX_ATTEMPTS = 50
+
+    while len(selected) < daily_count and attempts < MAX_ATTEMPTS:
+
+        attempts += 1
+
         subreddit = weighted_subreddit_choice(grouped, weights)
 
         if not subreddit:
             break
 
-        memes = grouped.get(subreddit, [])
+        available_memes = [
+            m for m in grouped[subreddit]
+            if m["meme_id"] not in used_memes
+        ]
 
-        # Remove already locally selected memes
-        memes = [m for m in memes if m["meme_id"] not in used_local]
-
-        if not memes:
-            # remove empty subreddit
+        if not available_memes:
             grouped.pop(subreddit, None)
             continue
 
         if random.random() < EXPLORATION_RATE:
-            chosen = random.choice(memes[:TOP_K])   # exploration
+
+            sample_pool = (
+                available_memes[:TOP_K]
+                if len(available_memes) > TOP_K
+                else available_memes
+            )
+
+            chosen = random.choice(sample_pool)
+
         else:
-            chosen = memes[0] # exploitation
+            chosen = available_memes[0]
+
         selected.append(chosen)
-        used_local.add(chosen["meme_id"])
+
+        used_memes.add(chosen["meme_id"])
+
+        # soft diversity
+        weights[subreddit] = weights.get(subreddit, 1.0) * 0.5
 
     conn.close()
+
     return selected
 
-def remove_missing_files(cursor):
-    cursor.execute("""
-        SELECT meme_id, image_path FROM memes
-        WHERE used = 0
-    """)
-    
-    rows = cursor.fetchall()
-    
-    for meme_id, path in rows:
-        if not path or not os.path.exists(path):
-            print(f"Cleaning missing file entry: {meme_id}")
-            cursor.execute(
-                "DELETE FROM memes WHERE meme_id = ?",
-                (meme_id,)
-            )
+
+if __name__ == "__main__":
+    print(select_memes(3))
