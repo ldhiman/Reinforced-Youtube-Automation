@@ -25,6 +25,7 @@ HIGH_PRIORITY_SUBREDDITS: List[str] = [
     "wholesomememes",
     "memes",
     "funny",
+    "dankinindia",
     "terriblefacebookmemes",
 ]
 
@@ -142,7 +143,7 @@ def main():
     init_db()
 
     logger.info("Fetching new memes...")
-    fetch_all_memes()
+    # fetch_all_memes()
 
     logger.info("Evaluating memes...")
     evaluate_memes()
