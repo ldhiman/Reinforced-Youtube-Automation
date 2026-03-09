@@ -883,34 +883,26 @@
     </div>
 
     <script>
-      /* ── Data ─────────────────────────────────────────────────── */
-      const data = {
-        subreddits: [
-          { s: "funny", v: 2, r: null },
-          { s: "TeenagersButBetter", v: 1, r: null },
-          { s: "comedyheaven", v: 1, r: null },
-          { s: "me_irl", v: 1, r: null },
-          { s: "okbuddybaka", v: 1, r: null },
-          { s: "196", v: 0, r: null },
-          { s: "2meirl4meirl", v: 0, r: null },
-          { s: "AdviceAnimals", v: 0, r: null },
-          { s: "ComedyCemetery", v: 0, r: null },
-          { s: "HistoryMemes", v: 0, r: null },
-          { s: "HolUp", v: 0, r: null },
-          { s: "LeagueOfMemes", v: 0, r: null },
-          { s: "MinecraftMemes", v: 0, r: null },
-          { s: "ProgrammerHumor", v: 0, r: null },
-          { s: "dankchristianmemes", v: 0, r: null },
-          { s: "dankmemes", v: 0, r: null },
-          { s: "meirl", v: 0, r: null },
-          { s: "memes", v: 0, r: null },
-          { s: "okbuddyretard", v: 0, r: null },
-          { s: "terriblefacebookmemes", v: 0, r: null },
-          { s: "wholesomememes", v: 0, r: null },
-        ],
-      };
+      /* ── Load JSON ───────────────────────────────────────────── */
+      async function loadData() {
+        const res = await fetch("./data.json");
+        const raw = await res.json();
 
-      /* ── Palette ──────────────────────────────────────────────── */
+        const data = {
+          total_memes: raw.total_memes,
+          total_videos: raw.total_videos,
+          avg_reward: raw.avg_reward,
+          subreddits: raw.subreddits.map((s) => ({
+            s: s.subreddit,
+            v: s.videos,
+            r: s.avg_reward,
+          })),
+        };
+
+        initDashboard(data);
+      }
+
+      /* ── Palette ─────────────────────────────────────────────── */
       const PALETTE = [
         "#c9973a",
         "#4a9fd4",
@@ -922,159 +914,164 @@
         "#6fa8d4",
       ];
 
-      /* ── Dates ────────────────────────────────────────────────── */
+      /* ── Initialize Dashboard ───────────────────────────────── */
+      function initDashboard(data) {
+        /* KPI numbers */
+        document.querySelectorAll(".kpi-num")[0].textContent =
+          data.total_memes.toLocaleString();
+
+        document.querySelectorAll(".kpi-num")[1].textContent =
+          data.total_videos;
+
+        document.querySelectorAll(".kpi-num")[2].textContent = data.avg_reward
+          ? data.avg_reward.toFixed(3)
+          : "—";
+
+        /* ── Table ───────────────────────────────────────────── */
+        const maxV = Math.max(...data.subreddits.map((d) => d.v));
+
+        document.getElementById("tableBody").innerHTML = data.subreddits
+          .map((d, i) => {
+            const color = PALETTE[i % PALETTE.length];
+            const pct = maxV > 0 ? (d.v / maxV) * 100 : 0;
+            const init = d.s.slice(0, 2).toUpperCase();
+
+            return `
+<tr>
+<td style="font-size:11px;color:var(--text-dim)">${String(i + 1).padStart(2, "0")}</td>
+
+<td>
+  <div class="td-name">
+    <div class="avatar" style="background:${color}18;color:${color}">
+      ${init}
+    </div>
+    <div class="td-label">r/${d.s}</div>
+  </div>
+</td>
+
+<td>
+<span class="status-pill ${d.v > 0 ? "status-active" : "status-idle"}">
+${d.v > 0 ? "▲ Active" : "— Idle"}
+</span>
+</td>
+
+<td>
+<div class="bar-row">
+<div class="bar-track">
+<div class="bar-fill" style="width:${pct}%;background:${color}"></div>
+</div>
+<span class="bar-num">${d.v}</span>
+</div>
+</td>
+
+<td class="reward-val">
+${d.r != null ? d.r.toFixed(3) : "—"}
+</td>
+</tr>
+`;
+          })
+          .join("");
+
+        /* ── Chart defaults ───────────────────────────────────── */
+        Chart.defaults.color = "#8a9ab0";
+        Chart.defaults.borderColor = "#243550";
+        Chart.defaults.font.family = "'Libre Franklin', sans-serif";
+        Chart.defaults.font.size = 11;
+
+        const active = data.subreddits.filter((d) => d.v > 0);
+
+        /* ── Bar Chart ───────────────────────────────────────── */
+        new Chart(document.getElementById("barChart"), {
+          type: "bar",
+          data: {
+            labels: active.map((d) => "r/" + d.s),
+            datasets: [
+              {
+                data: active.map((d) => d.v),
+                backgroundColor: active.map(
+                  (_, i) => PALETTE[i % PALETTE.length] + "25",
+                ),
+                borderColor: active.map((_, i) => PALETTE[i % PALETTE.length]),
+                borderWidth: 1.5,
+                borderRadius: 3,
+              },
+            ],
+          },
+          options: {
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { grid: { display: false } },
+              y: { beginAtZero: true, ticks: { stepSize: 1 } },
+            },
+          },
+        });
+
+        /* ── Donut Chart ─────────────────────────────────────── */
+        new Chart(document.getElementById("donutChart"), {
+          type: "doughnut",
+          data: {
+            labels: data.subreddits.map((d) => "r/" + d.s),
+            datasets: [
+              {
+                data: data.subreddits.map((d) => Math.max(d.v, 0.35)),
+                backgroundColor: data.subreddits.map(
+                  (_, i) => PALETTE[i % PALETTE.length] + "30",
+                ),
+                borderColor: data.subreddits.map(
+                  (_, i) => PALETTE[i % PALETTE.length],
+                ),
+                borderWidth: 1.5,
+              },
+            ],
+          },
+          options: {
+            cutout: "68%",
+            plugins: { legend: { display: false } },
+          },
+        });
+
+        /* ── Legend ─────────────────────────────────────────── */
+        document.getElementById("legend").innerHTML = active
+          .map(
+            (d, i) => `
+<div class="legend-item">
+<div class="legend-swatch"
+style="background:${PALETTE[i % PALETTE.length]}"></div>
+<span class="legend-name">r/${d.s}</span>
+<span class="legend-val">${d.v}</span>
+</div>
+`,
+          )
+          .join("");
+      }
+
+      /* ── Date / Time ───────────────────────────────────────── */
       const now = new Date();
+
       const fmt = (d) =>
         d.toLocaleDateString("en-GB", {
           day: "numeric",
           month: "long",
           year: "numeric",
         });
+
       const fmtT = (d) =>
-        d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+        d.toLocaleTimeString("en-GB", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+
       document.getElementById("ts").textContent = fmtT(now);
+
       document.getElementById("footerTs").textContent =
         "Last updated: " + fmt(now) + " · " + fmtT(now);
+
       document.getElementById("headerDate").innerHTML =
         `<strong style="color:var(--text-inv);font-size:13px;">${fmt(now)}</strong><br>
-   <span style="font-size:11px">Reporting period: all-time</span>`;
+  <span style="font-size:11px">Reporting period: all-time</span>`;
 
-      /* ── Table ────────────────────────────────────────────────── */
-      const maxV = Math.max(...data.subreddits.map((d) => d.v));
-      document.getElementById("tableBody").innerHTML = data.subreddits
-        .map((d, i) => {
-          const color = PALETTE[i % PALETTE.length];
-          const pct = maxV > 0 ? (d.v / maxV) * 100 : 0;
-          const init = d.s.slice(0, 2).toUpperCase();
-          return `
-  <tr>
-    <td style="font-size:11px;color:var(--text-dim);font-weight:400">${String(i + 1).padStart(2, "0")}</td>
-    <td>
-      <div class="td-name">
-        <div class="avatar" style="background:${color}18;color:${color}">${init}</div>
-        <div>
-          <div class="td-label">r/${d.s}</div>
-        </div>
-      </div>
-    </td>
-    <td>
-      <span class="status-pill ${d.v > 0 ? "status-active" : "status-idle"}">
-        ${d.v > 0 ? "▲ Active" : "— Idle"}
-      </span>
-    </td>
-    <td>
-      <div class="bar-row">
-        <div class="bar-track">
-          <div class="bar-fill" style="width:${pct}%;background:${color}"></div>
-        </div>
-        <span class="bar-num">${d.v}</span>
-      </div>
-    </td>
-    <td class="reward-val">${d.r != null ? d.r.toFixed(3) : "—"}</td>
-  </tr>`;
-        })
-        .join("");
-
-      /* ── Chart defaults ───────────────────────────────────────── */
-      Chart.defaults.color = "#8a9ab0";
-      Chart.defaults.borderColor = "#243550";
-      Chart.defaults.font.family = "'Libre Franklin', sans-serif";
-      Chart.defaults.font.size = 11;
-
-      /* ── Bar Chart ────────────────────────────────────────────── */
-      const active = data.subreddits.filter((d) => d.v > 0);
-      new Chart(document.getElementById("barChart"), {
-        type: "bar",
-        data: {
-          labels: active.map((d) => "r/" + d.s),
-          datasets: [
-            {
-              data: active.map((d) => d.v),
-              backgroundColor: active.map(
-                (_, i) => PALETTE[i % PALETTE.length] + "25",
-              ),
-              borderColor: active.map((_, i) => PALETTE[i % PALETTE.length]),
-              borderWidth: 1.5,
-              borderRadius: 3,
-              borderSkipped: false,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              backgroundColor: "#1d2f47",
-              borderColor: "#243550",
-              borderWidth: 1,
-              padding: 10,
-              callbacks: {
-                label: (c) =>
-                  "  " + c.raw + " video" + (c.raw !== 1 ? "s" : ""),
-              },
-            },
-          },
-          scales: {
-            x: { grid: { display: false }, ticks: { font: { size: 11 } } },
-            y: {
-              beginAtZero: true,
-              ticks: { stepSize: 1, font: { size: 11 } },
-              grid: { color: "rgba(36,53,80,0.8)" },
-            },
-          },
-        },
-      });
-
-      /* ── Donut Chart ──────────────────────────────────────────── */
-      new Chart(document.getElementById("donutChart"), {
-        type: "doughnut",
-        data: {
-          labels: data.subreddits.map((d) => "r/" + d.s),
-          datasets: [
-            {
-              data: data.subreddits.map((d) => Math.max(d.v, 0.35)),
-              backgroundColor: data.subreddits.map(
-                (_, i) => PALETTE[i % PALETTE.length] + "30",
-              ),
-              borderColor: data.subreddits.map(
-                (_, i) => PALETTE[i % PALETTE.length],
-              ),
-              borderWidth: 1.5,
-              hoverOffset: 5,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          cutout: "68%",
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              backgroundColor: "#1d2f47",
-              borderColor: "#243550",
-              borderWidth: 1,
-              padding: 10,
-              callbacks: {
-                label: (c) =>
-                  ` ${c.label}: ${data.subreddits[c.dataIndex].v} videos`,
-              },
-            },
-          },
-        },
-      });
-
-      /* ── Mini Legend (active only) ────────────────────────────── */
-      document.getElementById("legend").innerHTML = active
-        .map(
-          (d, i) => `
-  <div class="legend-item">
-    <div class="legend-swatch" style="background:${PALETTE[i % PALETTE.length]}"></div>
-    <span class="legend-name">r/${d.s}</span>
-    <span class="legend-val">${d.v}</span>
-  </div>`,
-        )
-        .join("");
+      /* ── Start ─────────────────────────────────────────────── */
+      loadData();
     </script>
   </body>
 </html>
