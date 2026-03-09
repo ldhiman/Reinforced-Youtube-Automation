@@ -87,16 +87,13 @@ def get_recent_videos(youtube) -> list[dict]:
     return videos
 
 
-def _already_fetched_recently(video_id: str) -> bool:
+def _already_fetched_recently(cursor, video_id: str) -> bool:
     """Returns True if this video was updated within REFETCH_HOURS."""
-    conn   = get_connection()
-    cursor = conn.cursor()
     cursor.execute("""
         SELECT fetched_at FROM analytics
         WHERE video_id = ?
     """, (video_id,))
     row = cursor.fetchone()
-    conn.close()
 
     if not row or not row[0]:
         return False
@@ -141,15 +138,7 @@ def get_video_analytics(analytics, video_id: str) -> dict | None:
     }
 
 
-def save_analytics(video_id: str, meme_id: str, metrics: dict):
-    conn   = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "SELECT video_length FROM videos WHERE meme_id = ?", (meme_id,)
-    )
-    row          = cursor.fetchone()
-    video_length = row[0] if row else 4.0
+def save_analytics(cursor, video_id: str, meme_id: str, video_length, metrics: dict):
 
     reward = calculate_reward(
         views=metrics["views"],
@@ -178,8 +167,6 @@ def save_analytics(video_id: str, meme_id: str, metrics: dict):
         reward,
     ))
 
-    conn.commit()
-    conn.close()
     logger.info(f"Saved analytics for {video_id} — views={metrics['views']} reward={reward:.3f}")
 
 
@@ -188,16 +175,15 @@ def run_feedback():
     videos = get_recent_videos(youtube)
     logger.info(f"Found {len(videos)} eligible videos.")
 
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+
     skipped = saved = 0
 
     for video in videos:
         vid_id  = video["video_id"]
         meme_id = video["meme_id"]
-
-        if _already_fetched_recently(vid_id):
-            logger.debug(f"Skipping {vid_id} — fetched within {REFETCH_HOURS}h")
-            skipped += 1
-            continue
 
         metrics = get_video_analytics(analytics, vid_id)
 
@@ -205,8 +191,31 @@ def run_feedback():
             logger.debug(f"No analytics yet for {vid_id}")
             continue
 
-        save_analytics(meme_id, meme_id, metrics)
+
+        cursor.execute(
+            "SELECT video_id, video_length FROM videos WHERE meme_id = ?",
+            (meme_id,)
+        )
+
+        row = cursor.fetchone()
+
+        if not row:
+            logger.warning(f"No video found for meme {meme_id}")
+            continue
+
+        video_db_id, video_length = row
+
+        
+        if _already_fetched_recently(cursor, video_db_id):
+            logger.debug(f"Skipping {video_db_id} — fetched within {REFETCH_HOURS}h")
+            skipped += 1
+            continue
+
+        save_analytics(cursor, video_db_id, meme_id, video_length, metrics)
         saved += 1
+
+    conn.commit()
+    conn.close()  
 
     logger.info(f"Feedback complete — {saved} updated, {skipped} skipped.")
 
