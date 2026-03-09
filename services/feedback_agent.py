@@ -205,7 +205,7 @@ def run_feedback():
             logger.debug(f"No analytics yet for {vid_id}")
             continue
 
-        save_analytics(vid_id, meme_id, metrics)
+        save_analytics(meme_id, meme_id, metrics)
         saved += 1
 
     logger.info(f"Feedback complete — {saved} updated, {skipped} skipped.")
