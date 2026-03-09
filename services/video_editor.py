@@ -153,18 +153,112 @@ def apply_ken_burns_effect(
         borderValue=(0, 0, 0, 0),
     )
 
+    # 1. Create the mask from the alpha channel
     mask = warped[:, :, 3] > 0
-    frame[mask] = warped[mask, :3]
+    
+    # 2. Extract the RGB channels from the warped meme
+    meme_rgb = warped[:, :, :3]
+    
+    # 3. Copy the meme onto the background frame only where the mask is active
+    frame[mask] = meme_rgb[mask]
+    
+    # 4. Optional: Add that slight brightness boost to the meme itself to make it "pop"
+    frame[mask] = cv2.add(frame[mask], np.array([12, 12, 12], dtype=np.uint8))
 
+def enhance_meme_visibility(image: np.ndarray) -> np.ndarray:
+    """Applies local contrast and saturation boost to make memes stand out."""
+    if image is None: return None
+    
+    # Drop Alpha channel if it exists for processing
+    has_alpha = image.shape[2] == 4
+    if has_alpha:
+        alpha = image[:, :, 3]
+        bgr = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+    else:
+        bgr = image.copy()
+
+    # Convert to LAB for lightness-only contrast enhancement (CLAHE)
+    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    
+    # ClipLimit 2.0 makes the text and image pop without looking "deep fried"
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    cl = clahe.apply(l)
+    
+    enhanced = cv2.merge((cl, a, b))
+    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+    
+    # Boost saturation slightly for mobile screens
+    hsv = cv2.cvtColor(enhanced, cv2.COLOR_BGR2HSV).astype("float32")
+    hsv[:, :, 1] *= 1.15 
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1], 0, 255)
+    enhanced = cv2.cvtColor(hsv.astype("uint8"), cv2.COLOR_HSV2BGR)
+
+    if has_alpha:
+        enhanced = cv2.cvtColor(enhanced, cv2.COLOR_BGR2BGRA)
+        enhanced[:, :, 3] = alpha
+        
+    return enhanced
+
+def _normalize_brightness(frame: np.ndarray, target_brightness: float = 135.0) -> np.ndarray:
+    """
+    Adjusts the frame brightness to a consistent target level.
+    128.0 is neutral; 135-145 is the 'YouTube Sweet Spot' for vibrant content.
+    """
+    # Convert to LAB color space
+    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+
+    # Calculate current average brightness
+    avg_l = np.mean(l)
+    
+    # Calculate the ratio needed to hit the target
+    # We use a cap to prevent extreme over-exposure
+    ratio = target_brightness / (avg_l + 1e-6)
+    ratio = np.clip(ratio, 0.85, 1.25) # Stay within safe 'CapCut' style limits
+
+    # Apply the shift
+    l = cv2.multiply(l, ratio)
+    l = np.clip(l, 0, 255).astype(np.uint8)
+
+    # Merge back
+    enhanced_lab = cv2.merge((l, a, b))
+    return cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
 
 def prepare_meme(path: str, max_w: int, max_h: int) -> np.ndarray:
     img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
     if img is None:
-        raise ValueError(f"Could not load image: {path}")
+        return None
+    
+    # Ensure it has 4 channels for the Ken Burns mask logic
+    if img.shape[2] == 3:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
+
+    img = enhance_meme_visibility(img)
+    
     h, w = img.shape[:2]
     scale = min(max_w / w, max_h / h)
-    return cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+    resized = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LANCZOS4)
+    
+    # Sharpness boost
+    gaussian = cv2.GaussianBlur(resized, (0, 0), 2.0)
+    resized = cv2.addWeighted(resized, 1.5, gaussian, -0.5, 0)
+    
+    return resized # <--- MUST HAVE THIS
 
+def sharpen(frame, strength=0.6):
+
+    blur = cv2.GaussianBlur(frame, (0,0), 1.2)
+
+    return cv2.addWeighted(frame, 1 + strength, blur, -strength, 0)
+
+def add_grain(frame, strength=4):
+
+    noise = np.random.normal(0, strength, frame.shape).astype(np.int16)
+
+    frame = frame.astype(np.int16) + noise
+
+    return np.clip(frame, 0, 255).astype(np.uint8)
 
 # -----------------------------
 # MAIN
@@ -195,11 +289,12 @@ def insert_memes(
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out    = cv2.VideoWriter(temp_video_path, fourcc, fps, (width, height))
 
-    margin          = 30
+    margin_w = width * 0.15  # 15% side margins
+    margin_h = height * 0.20 # 20% top/bottom margins for UI
     meme_duration   = 3.0
     total_frames    = int(meme_duration * fps)
-    max_w, max_h    = width - margin * 2, height - margin * 2
-    center_x, center_y = width / 2, height / 2
+    max_w, max_h = width - int(margin_w * 2), height - int(margin_h * 2)
+    center_x, center_y = width // 2, height // 2
 
     # Flash lasts this many frames at meme entry
     flash_frames    = max(3, int(fps * 0.12))  # ~3 frames at 24fps, scales with fps
@@ -207,6 +302,9 @@ def insert_memes(
     frames_written  = 0
     last_preset     = -1
     total_memes     = len(meme_paths)
+
+    total_video_duration = (total_memes * total_frames) / fps
+
 
     for meme_index, meme_path in enumerate(meme_paths):
         if not os.path.exists(meme_path):
@@ -235,12 +333,14 @@ def insert_memes(
                 if not ret:
                     break
 
+            is_last_frame = (meme_index == total_memes - 1) and (i == total_frames - 1)
+
             progress = i / total_frames
 
             # Background subtle zoom
-            bg_scale   = 1 + 0.05 * progress
+            bg_scale = 1 + 0.07 * (progress ** 1.5)
             bg_w, bg_h = int(width * bg_scale), int(height * bg_scale)
-            bg_resized = cv2.resize(frame, (bg_w, bg_h), interpolation=cv2.INTER_LINEAR)
+            bg_resized = cv2.resize(frame, (bg_w, bg_h), interpolation=cv2.INTER_LANCZOS4)
             x_off      = (bg_w - width) // 2
             y_off      = (bg_h - height) // 2
             frame      = bg_resized[y_off:y_off + height, x_off:x_off + width]
@@ -256,16 +356,25 @@ def insert_memes(
             )
 
             # Vignette — draws eye to center, away from edges
+            frame = _normalize_brightness(frame, target_brightness=140.0)
             frame = _apply_vignette(frame, strength=0.55)
+            frame = sharpen(frame, 0.4)
+            frame = add_grain(frame, 1)
 
             # Flash cut — only on first N frames of each meme entry
-            if i < flash_frames:
-                flash_progress = i / flash_frames  # 0→1 as flash fades
-                frame = _apply_flash(frame, flash_progress)
+            if i < int(fps * 0.12) and meme_index > 0:
+                frame = _apply_flash(frame, i / (fps * 0.12))
 
             # Segmented progress bar with glow
             _draw_progress_bar(frame, progress, meme_index, total_memes)
 
+            # Viral Color Grade: Boost contrast, reduce muddy greens
+            frame = cv2.convertScaleAbs(frame, alpha=1.05, beta=2)
+            # Subtle Blue-Shift (YouTube likes cool-tones for tech/meme content)
+            frame[:, :, 0] = cv2.add(frame[:, :, 0], 3) # Blue
+            
+            # Final Sharpening pass for 1080p clarity
+            frame = sharpen(frame, 0.3)
             out.write(frame)
             frames_written += 1
 
@@ -290,12 +399,19 @@ def insert_memes(
         "-map", "0:v:0?",
         "-map", "1:a:0?",
         "-c:v", "libx264",
-        "-preset", "slow",
-        "-crf", "18",
+        "-preset", "veryslow",
+        "-crf", "15",
+        "-tune", "film",
+        "-profile:v", "high",
+        "-level", "4.2",
+        "-threads", "0",
         "-pix_fmt", "yuv420p",
+        "-colorspace", "bt709",
+        "-color_trc", "bt709",
+        "-color_primaries", "bt709",
         "-movflags", "+faststart",
         "-c:a", "aac",
-        "-b:a", "192k",
+        "-b:a", "256k",
         "-shortest",
         final_output_path,
     ]

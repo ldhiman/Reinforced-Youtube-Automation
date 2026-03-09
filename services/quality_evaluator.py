@@ -4,7 +4,7 @@ import math
 import time
 
 
-DEFAULT_SCORE = 1.0
+DEFAULT_SCORE = 0.5
 
 # -----------------------------
 # Configurable weights
@@ -44,11 +44,11 @@ def load_template_weights(cursor):
 def compute_freshness(created_at):
 
     if not created_at:
-        return 1.0
+        return 0.5
 
     age_hours = (time.time() - created_at) / 3600
 
-    return max(0.5, 1 / (1 + age_hours / 24))
+    return max(0.1, 1 / (1 + age_hours / 12))
 
 
 # -----------------------------
@@ -89,7 +89,7 @@ def evaluate_memes():
             freshness_score * FRESHNESS_WEIGHT
         )
 
-        predicted_score = max(0.1, min(5.0, predicted_score))
+        predicted_score = max(0.0, min(1.0, predicted_score))
 
         updates.append((predicted_score, meme_id))
 

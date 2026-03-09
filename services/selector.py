@@ -58,7 +58,7 @@ def weighted_subreddit_choice(grouped, weights):
         return None
 
     probs = [
-        max(weights.get(sub, 1.0), 0.01)
+        max(weights.get(sub, 0.5), 0.05)
         for sub in available
     ]
 
@@ -120,7 +120,7 @@ def select_memes(daily_count: int = 5):
     print("Subreddit distribution:", {k: len(v) for k,v in grouped.items()})
 
     attempts = 0
-    MAX_ATTEMPTS = 50
+    MAX_ATTEMPTS = daily_count * 10
 
     while len(selected) < daily_count and attempts < MAX_ATTEMPTS:
 
